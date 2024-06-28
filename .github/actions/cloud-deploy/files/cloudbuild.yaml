@@ -49,7 +49,7 @@ steps:
         export VAL=$(awk '{f1=f2=$0; sub(/=.*/,"",f1); sub(/[^=]+=/,"",f2); printf "- name: %s\n  value: %s\n",f1,f2}' ./devops/vaults.${env_name} | sed 's/\"/\"/g')
 
         # generate manifest for each environment
-        yq e '.spec.template.spec.containers[0].env += env(VAL)' ./devops/gcp/k8s/service.template.yaml > ./devops/gcp/k8s/service.${env_name}.yaml
+        yq e '.spec.template.spec.containers[0].env += env(VAL)' ./devops/gcp/k8s/service.${env_name}.yaml
 
         # sidecard OAS proxy service, only Test environment need this service
         #if [[ "$env_name" != "test" ]]; then
