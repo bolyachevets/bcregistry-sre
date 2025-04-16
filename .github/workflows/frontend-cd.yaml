@@ -110,14 +110,39 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       # Trigger Cloud Deploy
-      - name: Deployment
+      - name: Deploy with Async + Verification
         working-directory: ${{ inputs.working_directory }}
-        run: |-
+        run: |
+          # 1. Submit build asynchronously (reusing ONLY existing substitutions)
           SHORT_SHA=$(git rev-parse --short HEAD)
-
-          echo $SHORT_SHA
-
           gcloud builds submit \
             --region=northamerica-northeast1 \
-            --substitutions _SHORT_SHA=$SHORT_SHA,_NODE_VERSION="${{ inputs.node_version }}",_PNPM_VERSION="${{ inputs.pnpm_version }}",_APP_NAME="${{ inputs.app_name }}",_DEPLOYMENT_ENV="${{ needs.setup.outputs.TARGET }}",_DEPLOYMENT_ENV_FROM="${{ needs.setup.outputs.TARGET_FROM }}",_REDEPLOY="${{ inputs.redeploy}}" \
+            --async \
+            --substitutions \
+              _SHORT_SHA=$SHORT_SHA,\
+              _NODE_VERSION="${{ inputs.node_version }}",\
+              _PNPM_VERSION="${{ inputs.pnpm_version }}",\
+              _APP_NAME="${{ inputs.app_name }}",\
+              _DEPLOYMENT_ENV="${{ needs.setup.outputs.TARGET }}",\
+              _DEPLOYMENT_ENV_FROM="${{ needs.setup.outputs.TARGET_FROM }}",\
+              _REDEPLOY="${{ inputs.redeploy}}" \
             --config cloudbuild.yaml
+
+          # 2. Get Build ID using existing unique substitutions
+          BUILD_ID=$(gcloud builds list \
+            --filter="substitutions._APP_NAME='${{ inputs.app_name }}' \
+              AND substitutions._DEPLOYMENT_ENV='${{ needs.setup.outputs.TARGET }}'" \
+            --sort-by="~create_time" \
+            --format="value(ID)" \
+            --limit=1)
+
+          echo "Build ID: $BUILD_ID"
+          echo "Console URL: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID"
+
+          # 3. Fail-fast verification (15m timeout)
+          timeout 15m gcloud builds log $BUILD_ID --stream || {
+            echo "::warning::Log streaming timed out - checking final status"
+            STATUS=$(gcloud builds describe $BUILD_ID --format="value(status)")
+            [ "$STATUS" = "SUCCESS" ] || { echo "::error::Build failed"; exit 1; }
+            echo "::notice::Build succeeded despite log timeout"
+          }
